@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  api:
+    image: aws-infrastructure-manager:${TAG:-latest}
+    container_name: aws-infra-manager-api
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.production
+    depends_on:
+      - db
+    networks:
+      - aws-infra-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  db:
+    image: postgres:15-alpine
+    container_name: aws-infra-manager-db
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+      - POSTGRES_DB=${DB_NAME:-aws_infra_manager}
+    networks:
+      - aws-infra-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  frontend:
+    image: aws-infrastructure-manager-frontend:${TAG:-latest}
+    container_name: aws-infra-manager-frontend
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - NODE_ENV=production
+    networks:
+      - aws-infra-network
+    depends_on:
+      - api
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aws-infra-manager-prometheus
+    restart: always
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    networks:
+      - aws-infra-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aws-infra-manager-grafana
+    restart: always
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3000:3000"
+    networks:
+      - aws-infra-network
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+networks:
+  aws-infra-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:

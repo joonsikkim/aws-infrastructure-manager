@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aws-infrastructure-manager:latest
+    container_name: aws-infra-manager-api
+    command: uvicorn src.app:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.development
+    depends_on:
+      - db
+      - localstack
+    networks:
+      - aws-infra-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  db:
+    image: postgres:15-alpine
+    container_name: aws-infra-manager-db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=aws_infra_manager
+    ports:
+      - "5432:5432"
+    networks:
+      - aws-infra-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: aws-infra-manager-localstack
+    ports:
+      - "4566:4566"
+      - "4510-4559:4510-4559"
+    environment:
+      - SERVICES=s3,dynamodb,lambda,cloudwatch
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+    volumes:
+      - ./localstack:/docker-entrypoint-initaws.d
+      - localstack_data:/tmp/localstack
+    networks:
+      - aws-infra-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aws-infra-manager-frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - REACT_APP_API_URL=http://localhost:8000
+    networks:
+      - aws-infra-network
+    depends_on:
+      - api
+
+networks:
+  aws-infra-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  localstack_data:
